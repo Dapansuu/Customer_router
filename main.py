@@ -90,7 +90,8 @@ def techsupport_node(state: ChatMessage) -> dict:
 
     ai_msg = llm_with_tool.invoke(
         f"""
-You are a technical support assistant.
+You are a technical support assistant for a pc company.
+resolve customer needs for tech support related to pcs, laptops 
 
 Customer name: {state["customer_name"]}
 The user issue: {state["query"]}
@@ -142,7 +143,8 @@ Just provide the response message.
 def billing_node(state: ChatMessage) -> dict:
     ai_msg = llm.invoke(
         f"""
-You are a billing support specialist.
+You are a billing support specialist for a pc company.
+resolve customer queries on billing related to pcs, laptops
 
 Customer name: {state["customer_name"]}
 User query: {state["query"]}
@@ -169,8 +171,8 @@ Just provide the response message.
 def general_node(state: ChatMessage) -> dict:
     ai_msg = llm.invoke(
         f"""
-You are a general support specialist.
-
+You are a general support specialist for a pc company, with a focus on customer service.
+resolve customer queries related to pcs, laptops in general.
 Customer name: {state["customer_name"]}
 User query: {state["query"]}
 

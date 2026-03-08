@@ -1,3 +1,4 @@
+import re
 import streamlit as st
 import sqlite3
 import uuid
@@ -31,6 +32,7 @@ def init_db() -> None:
         CREATE TABLE IF NOT EXISTS tickets (
             ticket_id TEXT PRIMARY KEY,
             customer_name TEXT NOT NULL,
+            phone_number TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL
         )
         """
@@ -38,9 +40,15 @@ def init_db() -> None:
 
     cur.execute("PRAGMA table_info(tickets)")
     cols = [row[1] for row in cur.fetchall()]
+
     if "customer_name" not in cols:
         cur.execute(
             "ALTER TABLE tickets ADD COLUMN customer_name TEXT NOT NULL DEFAULT 'Customer'"
+        )
+
+    if "phone_number" not in cols:
+        cur.execute(
+            "ALTER TABLE tickets ADD COLUMN phone_number TEXT NOT NULL DEFAULT ''"
         )
 
     cur.execute(
@@ -61,13 +69,21 @@ def init_db() -> None:
     conn.close()
 
 
-def create_ticket(customer_name: str) -> str:
+def create_ticket(customer_name: str, phone_number: str) -> str:
     ticket_id = str(uuid.uuid4())
     conn = get_connection()
     cur = conn.cursor()
     cur.execute(
-        "INSERT INTO tickets (ticket_id, customer_name, created_at) VALUES (?, ?, ?)",
-        (ticket_id, customer_name, datetime.now().isoformat(timespec="seconds")),
+        """
+        INSERT INTO tickets (ticket_id, customer_name, phone_number, created_at)
+        VALUES (?, ?, ?, ?)
+        """,
+        (
+            ticket_id,
+            customer_name,
+            phone_number,
+            datetime.now().isoformat(timespec="seconds"),
+        ),
     )
     conn.commit()
     conn.close()
@@ -83,16 +99,19 @@ def ticket_exists(ticket_id: str) -> bool:
     return row is not None
 
 
-def get_ticket_customer_name(ticket_id: str) -> Optional[str]:
+def get_ticket_details(ticket_id: str) -> Tuple[Optional[str], Optional[str]]:
     conn = get_connection()
     cur = conn.cursor()
     cur.execute(
-        "SELECT customer_name FROM tickets WHERE ticket_id = ?",
+        "SELECT customer_name, phone_number FROM tickets WHERE ticket_id = ?",
         (ticket_id,),
     )
     row = cur.fetchone()
     conn.close()
-    return row[0] if row else None
+
+    if row:
+        return row[0], row[1]
+    return None, None
 
 
 def save_message(ticket_id: str, role: str, content: str, intent: Optional[str] = None) -> None:
@@ -132,11 +151,17 @@ def load_messages(ticket_id: str) -> List[Tuple[str, str, Optional[str], str]]:
     return rows
 
 
+def is_valid_phone(phone_number: str) -> bool:
+    pattern = r"^\+?[0-9\s\-()]{7,20}$"
+    return bool(re.match(pattern, phone_number))
+
+
 def init_session() -> None:
     defaults = {
         "logged_in": False,
         "current_ticket_id": None,
         "customer_name": None,
+        "phone_number": None,
         "chat_history": [],
     }
     for key, value in defaults.items():
@@ -145,9 +170,12 @@ def init_session() -> None:
 
 
 def login_with_ticket(ticket_id: str) -> None:
+    customer_name, phone_number = get_ticket_details(ticket_id)
+
     st.session_state.logged_in = True
     st.session_state.current_ticket_id = ticket_id
-    st.session_state.customer_name = get_ticket_customer_name(ticket_id) or "Customer"
+    st.session_state.customer_name = customer_name or "Customer"
+    st.session_state.phone_number = phone_number or ""
     st.session_state.chat_history = []
 
     rows = load_messages(ticket_id)
@@ -166,6 +194,7 @@ def logout() -> None:
     st.session_state.logged_in = False
     st.session_state.current_ticket_id = None
     st.session_state.customer_name = None
+    st.session_state.phone_number = None
     st.session_state.chat_history = []
 
 
@@ -181,19 +210,33 @@ if not st.session_state.logged_in:
 
     with col1:
         st.subheader("Create New Ticket")
-        new_customer_name = st.text_input(
-            "Customer Name",
-            placeholder="Enter your name",
-            key="new_customer_name",
-        )
+
+        form_col1, form_col2 = st.columns(2)
+        with form_col1:
+            new_customer_name = st.text_input(
+                "Customer Name",
+                placeholder="Enter your name",
+                key="new_customer_name",
+            )
+        with form_col2:
+            new_phone_number = st.text_input(
+                "Phone Number",
+                placeholder="+91 9876543210",
+                key="new_phone_number",
+            )
 
         if st.button("Create New Ticket", use_container_width=True):
             customer_name = new_customer_name.strip()
+            phone_number = new_phone_number.strip()
 
             if not customer_name:
                 st.warning("Please enter your name.")
+            elif not phone_number:
+                st.warning("Please enter your phone number.")
+            elif not is_valid_phone(phone_number):
+                st.warning("Please enter a valid phone number.")
             else:
-                new_ticket = create_ticket(customer_name)
+                new_ticket = create_ticket(customer_name, phone_number)
                 login_with_ticket(new_ticket)
                 st.success("New ticket created.")
                 st.rerun()
@@ -222,8 +265,12 @@ if not st.session_state.logged_in:
 
 with st.sidebar:
     st.title("Session")
+
     st.markdown("### Customer")
     st.write(st.session_state.customer_name)
+
+    st.markdown("### Phone")
+    st.write(st.session_state.phone_number or "Not available")
 
     st.markdown("### Ticket")
     st.code(st.session_state.current_ticket_id, language=None)
@@ -237,7 +284,9 @@ st.title("Customer Support Router")
 st.caption(f"Welcome, {st.session_state.customer_name}.")
 
 st.info(
-    f"Customer: `{st.session_state.customer_name}`  \nTicket ID: `{st.session_state.current_ticket_id}`"
+    f"Customer: `{st.session_state.customer_name}`  \n"
+    f"Phone: `{st.session_state.phone_number}`  \n"
+    f"Ticket ID: `{st.session_state.current_ticket_id}`"
 )
 
 for msg in st.session_state.chat_history:
