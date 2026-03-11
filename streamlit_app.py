@@ -292,8 +292,6 @@ st.info(
 for msg in st.session_state.chat_history:
     with st.chat_message("user" if msg["role"] == "user" else "assistant"):
         st.markdown(msg["content"])
-        if msg["role"] == "assistant" and msg.get("intent"):
-            st.caption(f"Intent: {msg['intent']}")
 
 
 user_query = st.chat_input("Describe your issue...")
@@ -316,44 +314,71 @@ if user_query:
     )
 
     with st.chat_message("assistant"):
-        with st.spinner("Routing your request..."):
-            try:
-                initial_state = {
-                    "query": user_query,
-                    "customer_name": st.session_state.customer_name,
-                    "intent": "general",
-                    "final_response": "",
+        response_placeholder = st.empty()
+        intent_placeholder = st.empty()
+
+        try:
+            initial_state = {
+                "query": user_query,
+                "customer_name": st.session_state.customer_name,
+                "intent": "general",
+                "final_response": "",
+            }
+
+            streamed_text = ""
+            detected_intent = "general"
+
+            for chunk in workflow.stream(initial_state, stream_mode="messages"):
+                message, metadata = chunk
+
+                # collect token/content chunks from AI messages
+                if hasattr(message, "content") and message.content:
+                    if isinstance(message.content, str):
+                        streamed_text += message.content
+                    elif isinstance(message.content, list):
+                        for item in message.content:
+                            if isinstance(item, dict) and item.get("type") == "text":
+                                streamed_text += item.get("text", "")
+                            elif isinstance(item, str):
+                                streamed_text += item
+
+                    response_placeholder.markdown(streamed_text)
+
+                # try to capture intent from metadata if available
+                if isinstance(metadata, dict):
+                    if "intent" in metadata:
+                        detected_intent = metadata["intent"]
+
+            # final fallback in case stream did not expose full state
+            final_result = workflow.invoke(initial_state)
+            final_text = final_result.get("final_response", streamed_text).strip()
+            detected_intent = final_result.get("intent", detected_intent)
+
+            response_placeholder.markdown(final_text)
+            intent_placeholder.caption(f"Intent: {detected_intent}")
+
+            save_message(ticket_id, "assistant", final_text, detected_intent)
+
+            st.session_state.chat_history.append(
+                {
+                    "role": "assistant",
+                    "content": final_text,
+                    "intent": detected_intent,
+                    "created_at": datetime.now().isoformat(timespec="seconds"),
                 }
+            )
 
-                result = workflow.invoke(initial_state)
-                final_text = result["final_response"]
-                detected_intent = result["intent"]
+        except Exception as e:
+            error_msg = f"Error: {e}"
+            st.error(error_msg)
 
-                st.markdown(final_text)
-                st.caption(f"Intent: {detected_intent}")
+            save_message(ticket_id, "assistant", error_msg, "general")
 
-                save_message(ticket_id, "assistant", final_text, detected_intent)
-
-                st.session_state.chat_history.append(
-                    {
-                        "role": "assistant",
-                        "content": final_text,
-                        "intent": detected_intent,
-                        "created_at": datetime.now().isoformat(timespec="seconds"),
-                    }
-                )
-
-            except Exception as e:
-                error_msg = f"Error: {e}"
-                st.error(error_msg)
-
-                save_message(ticket_id, "assistant", error_msg, "general")
-
-                st.session_state.chat_history.append(
-                    {
-                        "role": "assistant",
-                        "content": error_msg,
-                        "intent": "general",
-                        "created_at": datetime.now().isoformat(timespec="seconds"),
-                    }
-                )
+            st.session_state.chat_history.append(
+                {
+                    "role": "assistant",
+                    "content": error_msg,
+                    "intent": "general",
+                    "created_at": datetime.now().isoformat(timespec="seconds"),
+                }
+            )
