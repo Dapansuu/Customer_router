@@ -4,3 +4,4 @@ langchain-core
 streamlit
 langchain
 dotenv
+ddgs
