@@ -46,6 +46,7 @@ def recommendation(issue: str) -> str:
     Use for recommendation/suggestion queries only.
     always give the latest information
     give prices in INR
+    always give the product, never give the website
     """
     try:
         results_text = []
